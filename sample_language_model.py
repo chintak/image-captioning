@@ -3,8 +3,7 @@ from __future__ import absolute_import
 
 import os
 import sys
-import logging
-import argparse
+import shutil
 import tensorflow as tf
 
 from reader import flickr8k_raw_data
@@ -107,6 +106,7 @@ def main(_):
   num_epochs = FLAGS.num_epochs
   batch_size = 128
   num_reader_threads = 4
+  ckpt_epoch_freq = 5
 
   initializer_scale = 0.08
   initializer = tf.random_uniform_initializer(
@@ -321,7 +321,7 @@ def main(_):
       learning_rate_decay_fn=learning_rate_decay_fn)
 
   # setup saver
-  saver = tf.train.Saver(max_to_keep=5)
+  saver = tf.train.Saver(max_to_keep=20)
 
   # setup Session and begin training
   sess = tf.Session()
@@ -336,7 +336,6 @@ def main(_):
   logger.info('Initial learning rate: {}'.format(initial_learning_rate))
   logger.info('Num of samples: {}'.format(num_train_samples))
   logger.info('Num of iters: {}'.format(num_iters_to_run))
-  logger.info('Save model per iters: {}'.format(num_batches_per_epoch))
 
   # restore previously saved model to resume training
   if FLAGS.resume_from_model_path:
@@ -355,15 +354,28 @@ def main(_):
       restorer.restore(sess, restore_path)
       logger.info('Restoring model from %s', restore_path)
 
+  best_model_loss = 100.
+  best_model_path = ""
+  model_save_freq = ckpt_epoch_freq * num_batches_per_epoch
+  logger.info('Save model per iters: {}'.format(model_save_freq))
   # train loop
   for i in range(num_iters_to_run):
     t_loss, niters, lr = sess.run([train_op, global_step, learning_rate])
     mean_loss_acc += t_loss
     if niters % 20 == 0:
       logger.info(print_msg(niters, lr, t_loss, mean_loss_acc / i))
-    if niters % num_batches_per_epoch == 0:
+    if niters % (model_save_freq) == 0:
       # completed epoch, save model snapshot
-      saver.save(sess, save_model_path, global_step=niters)
+      _path = saver.save(sess, save_model_path, global_step=niters)
+      if t_loss < best_model_loss:
+        if os.path.exists(best_model_path):
+          os.remove(best_model_path)
+        best_model_loss = t_loss
+        best_model_path = '{}-best-{:.2f}-{}'.format(
+            save_model_path, t_loss, niters)
+        shutil.copy(_path, best_model_path)
+  # save the final model
+  saver.save(sess, save_model_path, global_step=niters)
 
   coord.request_stop()
   coord.join(threads)
