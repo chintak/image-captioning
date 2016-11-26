@@ -2,6 +2,7 @@
 from __future__ import absolute_import
 
 import os
+import sys
 import logging
 import argparse
 import tensorflow as tf
@@ -23,6 +24,14 @@ tf.flags.DEFINE_string("save_model_path", "",
                        "Path to dir to save model checkpoint.")
 tf.flags.DEFINE_integer("num_epochs", 10,
                         "Num of epochs for training the model.")
+tf.flags.DEFINE_string("resume_from_model_path", None,
+                       "Path to model checkpoint to resume training.")
+tf.flags.DEFINE_string("lr_decay_method", None,
+                       "'exp' or 'piecewise' learning rate decay schedule.")
+tf.flags.DEFINE_string("lr_decay_boundaries", None,
+                       "Boundaries for piecewise learning rate decay.")
+tf.flags.DEFINE_string("lr_decay_values", "2.0,1.0,0.5,0.1,0.01",
+                       "Values to use for decaying lr using piecewise decay.")
 
 
 def parse_seq_example(serialized, image_feature, caption_feature):
@@ -42,15 +51,55 @@ def print_msg(*args):
   return "niter: {} lr: {} batch_loss: {} avg_batch_loss: {}".format(*args)
 
 
+def str_to_real_list(sval, delim=','):
+  return [float(v) for v in sval.split(delim)]
+
+
+def str_to_int_list(sval, delim=','):
+  return [int(v) for v in sval.split(delim)]
+
+
+def stringify(ls, sep=', '):
+  return sep.join([str(i) for i in ls])
+
+
+def piecewise_constant(x, bounds, vals):
+  assert bounds
+  assert vals
+  endb = len(bounds) - 1
+  endv = len(vals) - 1
+  bounds = tf.convert_to_tensor(bounds, dtype=tf.int32)
+  vals = tf.convert_to_tensor(vals, dtype=tf.float32)
+  pred_pair_fn = {}
+  pred_pair_fn[x <= bounds[0]] = lambda: vals[0]
+  pred_pair_fn[x > bounds[endb]] = lambda: vals[endv]
+  # for low, high, v in zip(bounds[:endb], bounds[1:], vals[1:endv]):
+  for i in range(endb):
+    v = vals[i + 1]
+    pred = (x > bounds[i]) & (x <= bounds[i + 1])
+    pred_pair_fn[pred] = lambda v=v: v
+    # pred_pair_fn[pred] = lambda v=v: v
+
+  default = lambda: vals[0]
+  return tf.case(pred_pair_fn, default, exclusive=True)
+
+
 def main(_):
   global logger
   # args = arguments()
   assert FLAGS.train_tfrecord_path
   assert FLAGS.save_model_path
+  assert FLAGS.lr_decay_method in ['exp', 'piecewise', None]
+
+  if not os.path.exists(FLAGS.save_model_path):
+    os.makedirs(FLAGS.save_model_path)
+  save_model_path = os.path.join(FLAGS.save_model_path, 'model')
 
   logger = config.log.getLogger(
       flag=3, fname='{}.log'.format(os.path.join(FLAGS.save_model_path, 'run')))
   logger.setLevel(config.log.level)
+  # print the experiment flags for logging purpose
+  logger.info("python %s", stringify(sys.argv, ' '))
 
   # Config variables
   mode = 'train'
@@ -79,12 +128,14 @@ def main(_):
     initial_learning_rate = 2.0
   else:
     initial_learning_rate = .05
+  lr_decay_method = FLAGS.lr_decay_method
+  # use the following params for exponential lr decay
   learning_rate_decay_rate = 0.5
-  num_epochs_per_decay = num_epochs // 5
-
-  if not os.path.exists(FLAGS.save_model_path):
-    os.mkdir(FLAGS.save_model_path)
-  save_model_path = os.path.join(FLAGS.save_model_path, 'model')
+  num_epochs_per_decay = min(num_epochs // 5, 10)
+  # use the following params for piecewise constant lr decay
+  num_decay_steps = 5
+  # FLAGS.lr_decay_values: [2.0 1.0 0.5 0.1]
+  lr_decay_values = str_to_real_list(FLAGS.lr_decay_values, ',')
 
   # setup the inputs
   filename_queue = tf.train.string_input_producer([FLAGS.train_tfrecord_path])
@@ -114,7 +165,6 @@ def main(_):
     images_and_captions.append([image, input_cap])
 
   # create dynamic padded batches for this captions and image features
-  # TODO: add an embedding layer for cnn features
 
   images, input_seqs, target_seqs, input_mask = batch_with_dynamic_pad(
       images_and_captions,
@@ -229,16 +279,37 @@ def main(_):
   mean_loss_acc = 0.
 
   # set up learing rate decay and learning rate decay
-  learning_rate = tf.constant(initial_learning_rate)
   learning_rate_decay_fn = None
-  if learning_rate_decay_rate > 0:
-    decay_steps = int(num_batches_per_epoch * num_epochs_per_decay)
-    learning_rate_decay_fn = tf.train.exponential_decay(
-        learning_rate,
-        global_step,
-        decay_steps,
-        learning_rate_decay_rate,
-        staircase=True)
+  if lr_decay_method == 'piecewise':
+    num_steps = len(lr_decay_values)
+    if FLAGS.lr_decay_boundaries:
+      lr_vs = str_to_int_list(FLAGS.lr_decay_boundaries, ',')
+      lr_decay_boundaries = [num_batches_per_epoch * i for i in lr_vs]
+    else:
+      batches_per_decay = (num_batches_per_epoch * num_epochs) // num_steps
+      lr_decay_boundaries = [batches_per_decay * i for i in range(1, num_steps)]
+    learning_rate = piecewise_constant(
+          global_step,
+          lr_decay_boundaries,
+          lr_decay_values)
+    logger.info('Learning rate with piecewise constant decay %s - %s',
+                stringify(lr_decay_boundaries), stringify(lr_decay_values))
+  elif lr_decay_method == 'exp' and learning_rate_decay_rate > 0:
+    initial_decay_steps = int(num_batches_per_epoch * num_epochs_per_decay)
+    decay_steps = tf.Variable(
+        initial_value=initial_decay_steps,
+        name="decay_steps",
+        trainable=False)
+    learning_rate = tf.train.exponential_decay(
+          initial_learning_rate,
+          global_step,
+          decay_steps,
+          learning_rate_decay_rate,
+          staircase=True)
+    logger.info('Learning rate decay configured after every %s steps.',
+                initial_decay_steps)
+  else:
+    learning_rate = tf.constant(initial_learning_rate)
 
   # now setup the optimizer for training the model
   train_op = tf.contrib.layers.optimize_loss(
@@ -246,7 +317,8 @@ def main(_):
       global_step=global_step,
       learning_rate=learning_rate,
       optimizer=optimizer_name,
-      clip_gradients=train_clip_gradients)
+      clip_gradients=train_clip_gradients,
+      learning_rate_decay_fn=learning_rate_decay_fn)
 
   # setup saver
   saver = tf.train.Saver(max_to_keep=5)
@@ -266,12 +338,29 @@ def main(_):
   logger.info('Num of iters: {}'.format(num_iters_to_run))
   logger.info('Save model per iters: {}'.format(num_batches_per_epoch))
 
+  # restore previously saved model to resume training
+  if FLAGS.resume_from_model_path:
+    restore_path = None
+    if os.path.isfile(FLAGS.resume_from_model_path):
+      restore_path = FLAGS.resume_from_model_path
+    else:
+      ckpt = tf.train.get_checkpoint_state(FLAGS.resume_from_model_path)
+      if ckpt and os.path.exists(ckpt.model_checkpoint_path):
+        restore_path = ckpt.model_checkpoint_path
+        restored_step = int(ckpt.model_checkpoint_path.split('-')[-1])
+      else:
+        logger.fatal('No restorable checkpoint model found.')
+    if restore_path:
+      restorer = tf.train.Saver(tf.all_variables())
+      restorer.restore(sess, restore_path)
+      logger.info('Restoring model from %s', restore_path)
+
   # train loop
   for i in range(num_iters_to_run):
     t_loss, niters, lr = sess.run([train_op, global_step, learning_rate])
     mean_loss_acc += t_loss
     if niters % 20 == 0:
-      logger.info(print_msg(niters, lr, t_loss, mean_loss_acc / niters))
+      logger.info(print_msg(niters, lr, t_loss, mean_loss_acc / i))
     if niters % num_batches_per_epoch == 0:
       # completed epoch, save model snapshot
       saver.save(sess, save_model_path, global_step=niters)
