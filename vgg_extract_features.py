@@ -8,7 +8,7 @@ from utils import CONFIG
 
 config = CONFIG.VGGFeatureExtractor
 log = logging.getLogger('FeatureExtractor')
-log.setLevel(config.logLevel)
+log.setLevel(config.log.level)
 
 
 def print_prob(prob):

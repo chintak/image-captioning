@@ -11,7 +11,7 @@ from utils import CONFIG
 
 config = CONFIG.DatasetLoader
 log = logging.getLogger('DatasetLoader')
-log.setLevel(config.logLevel)
+log.setLevel(config.log.level)
 
 
 class DatasetLoader(object):

@@ -8,7 +8,7 @@ from collections import Counter
 
 config = CONFIG.CapData
 logger = logging.getLogger('CapData')
-logger.setLevel(config.logLevel)
+logger.setLevel(config.log.level)
 
 __all__ = ['flickr8k_raw_data']
 
@@ -19,7 +19,7 @@ def _read_words(data_path):
                   header=None)
     # return list of names and list of captions
     return (df.name.tolist(),
-            [line.strip().split() for line in df.text.tolist()])
+            [line.lower().strip().split() for line in df.text.tolist()])
 
 
 def _build_vocab(data_path):
@@ -49,7 +49,8 @@ def flickr8k_raw_data(data_path):
     return ({'names': tr_names, 'word_to_ids': tr_word_to_ids},
             {'names': te_names, 'word_to_ids': te_word_to_ids},
             {'names': de_names, 'word_to_ids': de_word_to_ids},
-            len(vocab.keys()))
+            vocab)
+            # len(vocab.keys()))
 
 
 if __name__ == '__main__':

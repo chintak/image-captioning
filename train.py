@@ -11,7 +11,7 @@ from utils import CONFIG
 
 config = CONFIG.Model
 logger = logging.getLogger("Model")
-logger.setLevel(config.logLevel)
+logger.setLevel(config.log.level)
 
 FLAGS = tf.app.flags.FLAGS
 
