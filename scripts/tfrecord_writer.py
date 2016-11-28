@@ -2,17 +2,19 @@ import os
 import argparse
 import tensorflow as tf
 import numpy as np
+import sys
+sys.path.append('../')
 
 from reader import flickr8k_raw_data
 
-def make_example(image_feature, caption_feature):
+def make_example(image_feature, caption_feature, id):
     # The object we return
     ex = tf.train.SequenceExample()
     # A non-sequential feature of our example
     sequence_length = len(caption_feature)
     for f in image_feature:
         ex.context.feature["image_feature"].float_list.value.append(float(f))
-    # ex.context.feature["seq_length"].int64_list.value.append(sequence_length)
+    ex.context.feature["id"].bytes_list.value.append(id)
     fl_tokens = ex.feature_lists.feature_list["caption_feature"]
     for token in caption_feature:
         fl_tokens.feature.add().int64_list.value.append(token)
@@ -77,17 +79,17 @@ def main():
 
     # process train imgs and write to a record file
     train_tfrecord_name = os.path.join(
-        os.path.dirname(args.cnn_feats_path),
-        '{}.train.tfrecord'.format(
+        args.caption_tokens_dir, '{}.train.tfrecord'.format(
             '_'.join(feats_fname.split('_')[:-3])))
     train_writer = tf.python_io.TFRecordWriter(train_tfrecord_name)
     # for i, (img_name, cap_ids) in enumerate(
     #         zip(train_caps['names'], train_caps['word_to_ids'])):
     for i, (idx) in enumerate(rand_idx):
-        img_name = train_caps['names'][idx]
+        img_name = train_caps['names'][idx].split('#')[0]
         cap_ids = train_caps['word_to_ids'][idx]
-        img_feat = feats_mmap[img_to_idx[img_name.split('#')[0]], :]
-        train_writer.write(make_example(img_feat, cap_ids).SerializeToString())
+        img_feat = feats_mmap[img_to_idx[img_name], :]
+        train_writer.write(
+            make_example(img_feat, cap_ids, img_name).SerializeToString())
         if i % 100 == 0:
             print "train records written {}/{}".format(
                     i, len(train_caps['names']))
@@ -95,14 +97,15 @@ def main():
 
     # process test imgs and write to a record file
     test_tfrecord_name = os.path.join(
-        os.path.dirname(args.cnn_feats_path),
-        '{}.test.tfrecord'.format(
+        args.caption_tokens_dir, '{}.test.tfrecord'.format(
             '_'.join(feats_fname.split('_')[:-3])))
     test_writer = tf.python_io.TFRecordWriter(test_tfrecord_name)
     for i, (img_name, cap_ids) in enumerate(
             zip(test_caps['names'], test_caps['word_to_ids'])):
-        img_feat = feats_mmap[img_to_idx[img_name.split('#')[0]], :]
-        test_writer.write(make_example(img_feat, cap_ids).SerializeToString())
+        img_name = img_name.split('#')[0]
+        img_feat = feats_mmap[img_to_idx[img_name], :]
+        test_writer.write(
+            make_example(img_feat, cap_ids, img_name).SerializeToString())
         if i % 100 == 0:
             print "test records written {}/{}".format(
                     i, len(test_caps['names']))
@@ -110,18 +113,22 @@ def main():
 
     # process dev imgs and write to a record file
     dev_tfrecord_name = os.path.join(
-        os.path.dirname(args.cnn_feats_path),
-        '{}.dev.tfrecord'.format(
+        args.caption_tokens_dir, '{}.dev.tfrecord'.format(
             '_'.join(feats_fname.split('_')[:-3])))
     dev_writer = tf.python_io.TFRecordWriter(dev_tfrecord_name)
     for i, (img_name, cap_ids) in enumerate(
             zip(dev_caps['names'], dev_caps['word_to_ids'])):
-        img_feat = feats_mmap[img_to_idx[img_name.split('#')[0]], :]
-        dev_writer.write(make_example(img_feat, cap_ids).SerializeToString())
+        img_name = img_name.split('#')[0]
+        img_feat = feats_mmap[img_to_idx[img_name], :]
+        dev_writer.write(
+            make_example(img_feat, cap_ids, img_name).SerializeToString())
         if i % 100 == 0:
             print "dev records written {}/{}".format(
                     i, len(dev_caps['names']))
     dev_writer.close()
+    print "Wrote to %s" % train_tfrecord_name
+    print "Wrote to %s" % dev_tfrecord_name
+    print "Wrote to %s" % test_tfrecord_name
 
 
 if __name__ == '__main__':

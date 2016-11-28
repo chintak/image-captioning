@@ -3,8 +3,11 @@ from __future__ import absolute_import
 
 import os
 import sys
+import math
 import shutil
 import tensorflow as tf
+import numpy as np
+from pprint import pformat
 
 from reader import flickr8k_raw_data
 from configuration import CapConfig
@@ -17,10 +20,14 @@ logger = None
 
 FLAGS = tf.app.flags.FLAGS
 
-tf.flags.DEFINE_string("train_tfrecord_path", "",
+tf.flags.DEFINE_string("tfrecord_path", "",
                        "Path to training data in TFRecord format.")
-tf.flags.DEFINE_string("save_model_path", "",
+tf.flags.DEFINE_string("save_model_dir", "",
                        "Path to dir to save model checkpoint.")
+tf.flags.DEFINE_string("model_path", "",
+                       "Path to model for inference or eval mode.")
+tf.flags.DEFINE_string("out_caption_path", "",
+                       "Path to output the predicted captions.")
 tf.flags.DEFINE_integer("num_epochs", 10,
                         "Num of epochs for training the model.")
 tf.flags.DEFINE_string("resume_from_model_path", None,
@@ -31,19 +38,23 @@ tf.flags.DEFINE_string("lr_decay_boundaries", None,
                        "Boundaries for piecewise learning rate decay.")
 tf.flags.DEFINE_string("lr_decay_values", "2.0,1.0,0.5,0.1,0.01",
                        "Values to use for decaying lr using piecewise decay.")
+tf.flags.DEFINE_string("mode", "train",
+                       "Run mode.")
+tf.flags.DEFINE_string("optimizer", "SGD",
+                       "Optimizer to use - SGD or Adam.")
 
-
-def parse_seq_example(serialized, image_feature, caption_feature):
+def parse_seq_example(serialized, image_feature, caption_feature, id="id"):
   context, sequence = tf.parse_single_sequence_example(
     serialized,
     context_features={
-      image_feature: tf.FixedLenFeature([4096], dtype=tf.float32)
+      image_feature: tf.FixedLenFeature([4096], dtype=tf.float32),
+      id: tf.FixedLenFeature([], dtype=tf.string)
     },
     sequence_features={
       caption_feature: tf.FixedLenSequenceFeature([], dtype=tf.int64)
   })
 
-  return context[image_feature], sequence[caption_feature]
+  return context[image_feature], sequence[caption_feature], context[id]
 
 
 def print_msg(*args):
@@ -85,26 +96,38 @@ def piecewise_constant(x, bounds, vals):
 
 def main(_):
   global logger
-  # args = arguments()
-  assert FLAGS.train_tfrecord_path
-  assert FLAGS.save_model_path
-  assert FLAGS.lr_decay_method in ['exp', 'piecewise', None]
 
-  if not os.path.exists(FLAGS.save_model_path):
-    os.makedirs(FLAGS.save_model_path)
-  save_model_path = os.path.join(FLAGS.save_model_path, 'model')
+  assert FLAGS.mode in ['train', 'eval', 'inference']
+  if FLAGS.mode in ['eval', 'inference']:
+    assert os.path.exists(FLAGS.model_path)
+    assert FLAGS.out_caption_path
+    model_path = (tf.train.latest_checkpoint(FLAGS.model_path)
+                  if os.path.isdir(FLAGS.model_path) else FLAGS.model_path)
+    log_fname = '{}-eval.log'.format(model_path)
+  else:
+    assert FLAGS.tfrecord_path
+    assert FLAGS.lr_decay_method in ['exp', 'piecewise', None]
+    assert FLAGS.save_model_dir
+    if not os.path.exists(FLAGS.save_model_dir):
+      os.makedirs(FLAGS.save_model_dir)
+    save_model_path = os.path.join(FLAGS.save_model_dir, 'model')
+    log_fname = '{}.log'.format(os.path.join(FLAGS.save_model_dir, 'run'))
+
+  mode = FLAGS.mode
 
   logger = config.log.getLogger(
-      flag=3, fname='{}.log'.format(os.path.join(FLAGS.save_model_path, 'run')))
+      flag=3 if mode == 'train' else 1, fname=log_fname)
   logger.setLevel(config.log.level)
   # print the experiment flags for logging purpose
   logger.info("python %s", stringify(sys.argv, ' '))
 
   # Config variables
-  mode = 'train'
-  num_train_samples = 50000
-  num_epochs = FLAGS.num_epochs
-  batch_size = 128
+  c = 0
+  for record in tf.python_io.tf_record_iterator(FLAGS.tfrecord_path):
+     c += 1
+  num_train_samples = c
+  num_epochs = FLAGS.num_epochs if FLAGS.mode == 'train' else 1
+  batch_size = 128 if mode == 'train' else 1
   num_reader_threads = 4
   ckpt_epoch_freq = 5
 
@@ -123,11 +146,11 @@ def main(_):
   caption_feature = 'caption_feature'
 
   train_clip_gradients = 5.0
-  optimizer_name = 'SGD'
+  optimizer_name = FLAGS.optimizer
   if optimizer_name == 'SGD':
     initial_learning_rate = 2.0
   else:
-    initial_learning_rate = .05
+    initial_learning_rate = .001
   lr_decay_method = FLAGS.lr_decay_method
   # use the following params for exponential lr decay
   learning_rate_decay_rate = 0.5
@@ -138,7 +161,7 @@ def main(_):
   lr_decay_values = str_to_real_list(FLAGS.lr_decay_values, ',')
 
   # setup the inputs
-  filename_queue = tf.train.string_input_producer([FLAGS.train_tfrecord_path])
+  filename_queue = tf.train.string_input_producer([FLAGS.tfrecord_path])
 
   reader = tf.TFRecordReader()
 
@@ -160,8 +183,8 @@ def main(_):
   for i in range(batch_size):
     serialized_sample = values_queue.dequeue()
 
-    image, input_cap = parse_seq_example(serialized_sample,
-                                         image_feature, caption_feature)
+    image, input_cap, image_id = parse_seq_example(
+        serialized_sample, image_feature, caption_feature)
     images_and_captions.append([image, input_cap])
 
   # create dynamic padded batches for this captions and image features
@@ -280,7 +303,7 @@ def main(_):
 
   # set up learing rate decay and learning rate decay
   learning_rate_decay_fn = None
-  if lr_decay_method == 'piecewise':
+  if optimizer_name.lower() == 'sgd' and lr_decay_method == 'piecewise':
     num_steps = len(lr_decay_values)
     if FLAGS.lr_decay_boundaries:
       lr_vs = str_to_int_list(FLAGS.lr_decay_boundaries, ',')
@@ -294,7 +317,8 @@ def main(_):
           lr_decay_values)
     logger.info('Learning rate with piecewise constant decay %s - %s',
                 stringify(lr_decay_boundaries), stringify(lr_decay_values))
-  elif lr_decay_method == 'exp' and learning_rate_decay_rate > 0:
+  elif (optimizer_name.lower() == 'sgd' and lr_decay_method == 'exp' and
+        learning_rate_decay_rate > 0):
     initial_decay_steps = int(num_batches_per_epoch * num_epochs_per_decay)
     decay_steps = tf.Variable(
         initial_value=initial_decay_steps,
@@ -321,7 +345,7 @@ def main(_):
       learning_rate_decay_fn=learning_rate_decay_fn)
 
   # setup saver
-  saver = tf.train.Saver(max_to_keep=20)
+  saver = tf.train.Saver(max_to_keep=0)
 
   # setup Session and begin training
   sess = tf.Session()
@@ -329,11 +353,11 @@ def main(_):
 
   init = tf.initialize_all_variables()
   sess.run(init)
-  threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-  logger.info('TFRecord file: {}'.format(FLAGS.train_tfrecord_path))
-  logger.info('Mode save path: {}'.format(FLAGS.save_model_path))
-  logger.info('Initial learning rate: {}'.format(initial_learning_rate))
+  logger.info('TFRecord file: {}'.format(FLAGS.tfrecord_path))
+  if mode == 'train':
+    logger.info('Mode save path: {}'.format(FLAGS.save_model_dir))
+    logger.info('Initial learning rate: {}'.format(initial_learning_rate))
   logger.info('Num of samples: {}'.format(num_train_samples))
   logger.info('Num of iters: {}'.format(num_iters_to_run))
 
@@ -354,40 +378,78 @@ def main(_):
       restorer.restore(sess, restore_path)
       logger.info('Restoring model from %s', restore_path)
 
-  best_model_loss = 100.
-  best_model_path = ""
-  model_save_freq = ckpt_epoch_freq * num_batches_per_epoch
-  logger.info('Save model per iters: {}'.format(model_save_freq))
-  # train loop
-  for i in range(num_iters_to_run):
-    t_loss, niters, lr = sess.run([train_op, global_step, learning_rate])
-    mean_loss_acc += t_loss
-    if niters % 20 == 0:
-      logger.info(print_msg(niters, lr, t_loss, mean_loss_acc / i))
-    if niters % (model_save_freq) == 0:
-      # completed epoch, save model snapshot
-      _path = saver.save(sess, save_model_path, global_step=niters)
-      if t_loss < best_model_loss:
-        if os.path.exists(best_model_path):
-          os.remove(best_model_path)
-        best_model_loss = t_loss
-        best_model_path = '{}-best-{:.2f}-{}'.format(
-            save_model_path, t_loss, niters)
-        shutil.copy(_path, best_model_path)
-  # save the final model
-  saver.save(sess, save_model_path, global_step=niters)
+  if mode == 'eval':
+    restorer = tf.train.Saver(tf.all_variables())
+    restorer.restore(sess, model_path)
+
+  tf.get_default_graph().finalize()
+  threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+  if mode == 'train':
+    best_model_loss = 100.
+    best_model_path = ""
+    model_save_freq = ckpt_epoch_freq * num_batches_per_epoch
+    logger.info('Save model per iters: {}'.format(model_save_freq))
+    # train loop
+    for i in range(num_iters_to_run):
+      t_loss, niters, lr = sess.run([train_op, global_step, learning_rate])
+      mean_loss_acc += t_loss
+      if niters % 20 == 0:
+        logger.info(print_msg(niters, lr, t_loss, mean_loss_acc / i))
+      if niters % (model_save_freq) == 0:
+        # completed epoch, save model snapshot
+        _path = saver.save(sess, save_model_path, global_step=niters)
+        if t_loss < best_model_loss:
+          if os.path.exists(best_model_path):
+            os.remove(best_model_path)
+          best_model_loss = t_loss
+          best_model_path = '{}-best-{:.2f}-{}'.format(
+              save_model_path, t_loss, niters)
+          shutil.copy(_path, best_model_path)
+    # save the final model
+    saver.save(sess, save_model_path, global_step=niters)
+
+  elif mode == 'eval':
+    logger.info('Evaluating model: %s', model_path)
+    # eval loop
+    sum_losses = 0.
+    sum_weights = 0
+    cap_gens = {}
+    for i in xrange(num_iters_to_run):
+      tgs, logi, los, im_id, eval_cross_entropy_loss, eval_weights = sess.run(
+          [targets, logits, losses, image_id,
+           target_cross_entropy_losses, target_cross_entropy_loss_weights])
+
+      cap_gens[i] = {
+          'true': tgs,
+          'pred': np.argmax(logi, 1),
+          'logi': logi,
+          'eval_loss': eval_cross_entropy_loss,
+          'mask': eval_weights,
+          'id': im_id,
+          }
+      # each image is evaluated 5 times
+      eval_weights /= 5.0
+      sum_losses += np.sum(eval_cross_entropy_loss * eval_weights)
+      sum_weights += np.sum(eval_weights)
+
+      if i % 500 == 0:
+        logger.info("Computed loss for %d/%d batches", i, num_iters_to_run)
+
+    # write the most probable captions to file for computing other metrics
+    save_predicted_caps_path = FLAGS.out_caption_path
+    with open(save_predicted_caps_path, 'wb') as fp:
+      import cPickle as pickle
+
+      pickle.dump(cap_gens, fp)
+    logger.info("Writing predicted caps to %s", save_predicted_caps_path)
+
+    perplexity = math.exp(sum_losses / sum_weights)
+    logger.info("Perplexity = %.2f", perplexity)
 
   coord.request_stop()
   coord.join(threads)
   sess.close()
-
-
-def arguments():
-  parser = argparse.ArgumentParser()
-  parser.add_argument('train_tfrecord_path', help='Path to train TFRecord.')
-  parser.add_argument('--save_model_path', help='Path to save model ckpt.')
-  args = parser.parse_args()
-  return args
 
 
 if __name__ == '__main__':
