@@ -62,6 +62,8 @@ CONFIG.VGGFeatureExtractor.feat_size = 4096
 #
 CONFIG.CapData.log = CONFIG.log
 CONFIG.CapData.log.level = logging.DEBUG
+CONFIG.CapData.max_length = 25
+CONFIG.CapData.min_freq = 5
 
 #
 # model related configs

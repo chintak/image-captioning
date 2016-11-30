@@ -18,15 +18,24 @@ logger.setLevel(config.log.level)
 
 __all__ = ['flickr8k_raw_data']
 
+def _parse_caption(txt):
+    txt = txt.strip().lower().replace(",", "").replace("'", "")
+    txt = txt.replace(".", "").replace("\"", "").replace("!", "")
+    txt = txt.replace("?", "").replace("-", "").replace(')', '')
+    txt = txt.replace("(", "").replace("&", "and")
+    txt = " ".join(txt.split())
+    return txt
+
 
 def _read_words(data_path):
     # read the captions and build a test language model on this data
     df = read_csv(data_path, delimiter='\t', names=['name', 'text'],
                   header=None)
-    df.text = map(lambda k: k.strip().lower(), df.text)
+    df.text = map(_parse_caption, df.text)
+    df['image_id'] = map(lambda k: k.split('#')[0], df.name)
     # return list of names and list of captions
-    tokens = [
-        ['<ST>'] + word_tokenize(line) + ['<ET>'] for line in df.text.tolist()]
+    tokens = [['<ST>'] + word_tokenize(line) + ['.', '<ET>']
+              for line in df.text.tolist()]
     return (df.name.tolist(), tokens)
 
 
