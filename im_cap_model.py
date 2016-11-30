@@ -175,22 +175,47 @@ class ImCapModel(object):
 
     return loss / tf.to_float(self.flags.batch_size)
 
+
   def build_generator(self):
     self._build_inputs()
     self._build_image_embed_layer()
     self._build_word_embed_layer()
-    initial_state = self._initialize_lstm(self.image_embeddings)
 
-    with tf.variable_scope(
-          'lstm',initializer=self.flags.params_initializer) as lstm_scope:
-      lstm_scope.reuse_variables()
+    word_captions = self.input_seqs
+    enc_captions = self.seq_embeddings
+    input_sequence = enc_captions[:, :self.flags.cap_ntime_steps, :]
+    sequence_mask = tf.to_float(tf.not_equal(word_captions, self._pad))
 
-      # Placeholder for feeding a batch of concatenated states.
-      state_feed = tf.placeholder(
-          dtype=tf.float32,
-          shape=[None, self.cell.state_size],
-          name="state_feed")
-      state_tuple = tf.split(1, 2, state_feed)
+    state_list = self._initialize_lstm(self.image_embeddings)
+    indices = tf.to_int64(tf.expand_dims(
+        tf.range(0, self.flags.batch_size, 1), 1))
+    one_hot_map_size = [self.flags.batch_size, self.flags.cap_vocab_size]
+
+    loss = 0.0
+
+    for t in range(self.flags.cap_ntime_steps):
+      labels = tf.expand_dims(word_captions[:, t], 1)
+      idx_to_labs = tf.concat(1, [indices, labels])
+      target_sequence = tf.sparse_to_dense(
+          idx_to_labs, tf.to_int64(tf.pack(one_hot_map_size)), 1.0, 0.0)
+
+      with tf.variable_scope(
+          'lstm', initializer=self.flags.params_initializer, reuse=True):
+        # Run a single LSTM step.
+        m, state_list = self.cell(input_sequence[:, t, :], state=state_list)
+
+      with tf.variable_scope('logits', reuse=(t!=0)) as logits_scope:
+        w_o = tf.get_variable('w', shape=[self.flags.num_lstm_units,
+                                          self.flags.cap_vocab_size])
+        b_o = tf.get_variable('b', shape=[self.flags.cap_vocab_size])
+
+        logits = tf.matmul(m, w_o) + b_o
+
+        softmax = tf.nn.softmax_cross_entropy_with_logits(
+            logits, target_sequence)
+        loss += tf.reduce_sum(softmax * sequence_mask[:, t])
+
+    return loss / tf.to_float(self.flags.batch_size)
 
 
 ###############################################################################
