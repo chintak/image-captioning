@@ -8,7 +8,10 @@ import argparse
 from pprint import pformat
 
 from score import get_score
+from utils import CONFIG
 
+config = CONFIG.Decoder
+logger = config.log.getLogger(flag=3, fname='report.txt', fmode='a')
 
 parser = argparse.ArgumentParser()
 parser.add_argument('encoded_caps_path')
@@ -43,7 +46,7 @@ for i, val in enumerate(caps.values()):
     ref[val['id']] = [true_cap]
   decoded_caps[val['id']] = {
       'true': ref[val['id']],
-      'pred': hyp[va['id']]
+      'pred': hyp[val['id']]
       }
 
 for k, v in hyp.iteritems():

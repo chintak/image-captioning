@@ -2,7 +2,7 @@ import logging
 from addict import Dict
 
 
-def _setup_logger(flag=0, name=None, fname=None, fmt=None):
+def _setup_logger(flag=0, name=None, fname=None, fmt=None, fmode='w'):
   """Setup logger
 
   flag:
@@ -26,7 +26,7 @@ def _setup_logger(flag=0, name=None, fname=None, fmt=None):
       fname = 'run.log'
     _formatter_with_time = logging.Formatter(
         "%(asctime)s %(levelname)s %(message)s", datefmt='%m/%d/%Y %I:%M:%S %p')
-    _filer = logging.FileHandler(fname, mode='w')
+    _filer = logging.FileHandler(fname, mode=fmode)
     _filer.setFormatter(_formatter_with_time)
     _logger.addHandler(_filer)
   return _logger
@@ -70,4 +70,6 @@ CONFIG.CapData.min_freq = 5
 #
 CONFIG.Trainer.log = CONFIG.log
 CONFIG.Trainer.log.level = logging.DEBUG
+
+CONFIG.Decoder.log = CONFIG.log
 

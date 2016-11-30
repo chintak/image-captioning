@@ -236,6 +236,8 @@ def main(_):
     zero_state = cell.zero_state(
         batch_size=image_embeddings.get_shape()[0], dtype=tf.float32)
     _, initial_state = cell(image_embeddings, zero_state)
+    print "shape", image_embeddings.get_shape()
+    return
 
     lstm_scope.reuse_variables()
 
@@ -415,6 +417,7 @@ def main(_):
     sum_losses = 0.
     sum_weights = 0
     cap_gens = {}
+    loss_logs = {}
     for i in xrange(num_iters_to_run):
       tgs, logi, los, im_id, eval_cross_entropy_loss, eval_weights = sess.run(
           [targets, logits, losses, image_id,
@@ -423,13 +426,15 @@ def main(_):
       cap_gens[i] = {
           'true': tgs,
           'pred': np.argmax(logi, 1),
+          'id': im_id,
+          }
+      loss_logs[i] = {
           'logi': logi,
           'eval_loss': eval_cross_entropy_loss,
           'mask': eval_weights,
           'id': im_id,
           }
       # each image is evaluated 5 times
-      eval_weights /= 5.0
       sum_losses += np.sum(eval_cross_entropy_loss * eval_weights)
       sum_weights += np.sum(eval_weights)
 
@@ -437,12 +442,14 @@ def main(_):
         logger.info("Computed loss for %d/%d batches", i, num_iters_to_run)
 
     # write the most probable captions to file for computing other metrics
+    logger.info("Pickling eval results...")
     save_predicted_caps_path = FLAGS.out_caption_path
     with open(save_predicted_caps_path, 'wb') as fp:
       import cPickle as pickle
 
       pickle.dump(cap_gens, fp)
-    logger.info("Writing predicted caps to %s", save_predicted_caps_path)
+      pickle.dump(loss_logs, fp)
+    logger.info("Wrote predicted caps to %s", save_predicted_caps_path)
 
     perplexity = math.exp(sum_losses / sum_weights)
     logger.info("Perplexity = %.2f", perplexity)
