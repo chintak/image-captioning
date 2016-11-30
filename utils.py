@@ -1,4 +1,5 @@
 import logging
+import os
 from addict import Dict
 
 
@@ -26,6 +27,8 @@ def _setup_logger(flag=0, name=None, fname=None, fmt=None, fmode='w'):
       fname = 'run.log'
     _formatter_with_time = logging.Formatter(
         "%(asctime)s %(levelname)s %(message)s", datefmt='%m/%d/%Y %I:%M:%S %p')
+    if not os.path.exists(fname):
+      os.makedirs(os.path.dirname(fname))
     _filer = logging.FileHandler(fname, mode=fmode)
     _filer.setFormatter(_formatter_with_time)
     _logger.addHandler(_filer)

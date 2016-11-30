@@ -122,3 +122,8 @@ def flickr8k_raw_data(data_path):
     save_pick(save_path, (names, word_ids))
     print "Saved annotations for %s set." % split
   print 'Captions tokenized and encoded.'
+
+
+if __name__ == '__main__':
+  flickr8k_raw_data('../data/Flickr8k_Captions')
+

@@ -4,7 +4,7 @@ from os.path import join
 
 __all__ = ['model', 'solver']
 
-_home_dir = 'expts/test_model'
+_home_dir = 'expts/new_long'
 _log_fname = 'run.log'
 # Configuration for setting up a test model
 model = Dict()
@@ -26,9 +26,9 @@ model.log_fname = join(_home_dir, _log_fname)
 # Configuration for training the test model
 solver = Dict()
 
-solver.num_epochs = 10
+solver.num_epochs = 100
 solver.save_model_dir = join(_home_dir, 'model')
-solver.max_to_keep = 2
+solver.max_to_keep = 0
 solver.ckpt_epoch_freq = 2
 solver.train_clip_gradients = 5.0
 

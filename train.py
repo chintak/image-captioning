@@ -14,7 +14,6 @@ import cPickle as pickle
 import importlib
 
 from im_cap_model import ImCapModel
-from models import test
 from utils import CONFIG
 
 config = CONFIG.Trainer
@@ -87,18 +86,18 @@ def restore_model(path):
 def print_msg(*args):
   return "epoch: {} niter: {} batch_loss: {} curr_epoch_loss: {}".format(*args)
 
-def main(conf={}):
+def main(_, conf={}):
   global logger
-  logger = config.log.getLogger(flag=2)
-  assert exists(FLAGS.cnn_features_path) or exists(conf['cnn_features_path'])
-  assert exists(FLAGS.raw_captions_dir) or exists(conf['raw_captions_dir'])
-  cnn_feats_path = (FLAGS.cnn_features_path
-                    if FLAGS.cnn_features_path else conf['cnn_features_path'])
-  raw_captions_dir = (FLAGS.raw_captions_dir
-                      if FLAGS.raw_captions_dir else conf['raw_captions_dir'])
-  model_name = (FLAGS.model_config_name
-                if FLAGS.model_config_name else conf['model_config_name'])
-  importlib.import_module(model_name)
+  assert exists(FLAGS.cnn_features_path)
+  assert exists(FLAGS.raw_captions_dir)
+  cnn_feats_path = FLAGS.cnn_features_path
+  raw_captions_dir = FLAGS.raw_captions_dir
+  try:
+    mymodel = importlib.import_module(FLAGS.model_config_name)
+  except:
+    raise AttributeError("No model named %s" % FLAGS.model_config_name)
+  solver_config = mymodel.solver
+  logger = config.log.getLogger(flag=3, fname=solver_config.log_fname)
   # print the experiment flags for logging purpose
   logger.info("python %s", stringify(sys.argv, ' '))
 
@@ -114,9 +113,8 @@ def main(conf={}):
   (img_to_idx, train_cnn_features) = load_cnn_features(cnn_feats_path)
 
   # load the model config
-  model_config = test.model
+  model_config = mymodel.model
   num_samples = model_config.num_samples = len(train_image_ids)
-  solver_config = test.solver
 
   batch_size = model_config.batch_size
   num_epochs = solver_config.num_epochs
@@ -183,18 +181,16 @@ def main(conf={}):
     idxs = np.random.permutation(num_samples)
     # caption features: train_image_ids, train_raw_captions
     # image features: img_to_idx, train_cnn_features
-    print train_raw_captions.shape
     epoch_captions = train_raw_captions[idxs, :]
     epoch_image_ids = train_image_ids[idxs]
 
-    for start, end in zip(xrange(0, niters_per_epoch, batch_size),
-                          xrange(batch_size, niters_per_epoch, batch_size)):
+    for start, end in zip(range(0, num_samples, batch_size),
+                          range(batch_size, num_samples, batch_size)):
       batch_caps = epoch_captions[start:end, :]
       batch_img_ids = epoch_image_ids[start:end]
       im_ids = [img_to_idx[ind] for ind in batch_img_ids]
       batch_cnn = train_cnn_features[im_ids, ...]
 
-      print batch_caps.shape, batch_cnn.shape, model.images
       feeder = {model.images: batch_cnn, model.input_seqs: batch_caps}
       _, batch_loss, niters = sess.run(
         [train_op, loss, global_step], feed_dict=feeder)
@@ -205,20 +201,12 @@ def main(conf={}):
 
     if bool_save_model and i % (model_save_freq) == 0:
       # completed epoch, save model snapshot
-      _path = saver.save(sess, save_model_path, global_step=i)
-      if t_loss < best_model_loss:
-        if exists(best_model_path):
-          os.remove(best_model_path)
-        best_model_loss = t_loss
-        best_model_path = '{}-best-{:.2f}-{}'.format(
-            save_model_path, t_loss, niters)
-        shutil.copy(_path, best_model_path)
+      _path = saver.save(sess, solver_config.save_model_dir, global_step=i)
   if bool_save_model:
     # save the final model
-    saver.save(sess, save_model_path, global_step=niters)
+    saver.save(sess, solver_config.save_model_dir, global_step=niters)
 
   coord.request_stop()
-  coord.join(threads)
   sess.close()
 
 
