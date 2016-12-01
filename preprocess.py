@@ -1,6 +1,7 @@
 import os
 import logging
 import numpy as np
+import argparse
 from utils import CONFIG
 from pandas import read_csv
 from pprint import pformat
@@ -124,6 +125,12 @@ def flickr8k_raw_data(data_path):
   print 'Captions tokenized and encoded.'
 
 
-if __name__ == '__main__':
-  flickr8k_raw_data('../data/Flickr8k_Captions')
+def arguments():
+  parser = argparse.ArgumentParser()
+  parser.add_argument('caption_dir')
+  return parser.parse_args()
 
+if __name__ == '__main__':
+  args = arguments()
+  # '../data/Flickr8k_Captions'
+  flickr8k_raw_data(args.caption_dir)

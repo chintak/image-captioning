@@ -68,7 +68,7 @@ def stringify(ls, sep=', '):
   return sep.join([str(i) for i in ls])
 
 
-def restore_model(path):
+def restore_model(sess, path):
   if isfile(path):
     restore_path = path
   else:
@@ -79,12 +79,16 @@ def restore_model(path):
     else:
       logger.fatal('No restorable checkpoint model found.')
   if restore_path:
-    restorer = tf.train.Saver(tf.all_variables())
+    restorer = tf.train.Saver()
     restorer.restore(sess, restore_path)
     logger.info('Restoring model from %s', restore_path)
 
 def print_msg(*args):
   return "epoch: {} niter: {} batch_loss: {} curr_epoch_loss: {}".format(*args)
+
+def decode_samples_to_captions(samples, id_to_word):
+  return [[id_to_word[idx] for idx in sample if id_to_word.get(idx, None)]
+          for sample in samples]
 
 def main(_, conf={}):
   global logger
@@ -101,13 +105,18 @@ def main(_, conf={}):
   # print the experiment flags for logging purpose
   logger.info("python %s", stringify(sys.argv, ' '))
 
-  # load image captions
+  # load train image captions
   train_cap_path = join(raw_captions_dir, 'Flickr8k.train.annotation.kl')
   train_image_ids, train_raw_captions = unpickle(train_cap_path)
+
+  # load dev image captions
+  dev_cap_path = join(raw_captions_dir, 'Flickr8k.dev.annotation.kl')
+  dev_image_ids, dev_raw_captions = unpickle(dev_cap_path)
 
   # load vocab
   vocab_path = join(raw_captions_dir, 'vocab.kl')
   word_to_ids = unpickle(vocab_path)
+  id_to_word = dict([(v, k) for k, v in word_to_ids.iteritems()])
 
   # load cnn features
   (img_to_idx, train_cnn_features) = load_cnn_features(cnn_feats_path)
@@ -127,6 +136,7 @@ def main(_, conf={}):
   model = ImCapModel(model_config, word_to_ids)
   loss = model.build_model()
   tf.get_variable_scope().reuse_variables()
+  generated_captions = model.build_generator()
 
   global_step = tf.Variable(
       initial_value=0,
@@ -156,7 +166,7 @@ def main(_, conf={}):
   # restore previously saved model to resume training
   bool_resume_path = True if model_config.resume_from_model_path else False
   if bool_resume_path and exists(model_config.resume_from_model_path):
-    restore_model(model_config.resume_from_model_path)
+    restore_model(sess, model_config.resume_from_model_path)
 
   tf.get_default_graph().finalize()
 
@@ -167,6 +177,15 @@ def main(_, conf={}):
   # placeholders
   image_feature = model_config.img_input_feed
   caption_feature = model_config.cap_input_feed
+
+  # setup 10 random dev set images to check the generated captions
+  num_gen_samples = model_config.batch_size
+  samp_idx = np.random.randint(0, dev_raw_captions.shape[0], num_gen_samples)
+  samp_captions = dev_raw_captions[samp_idx, :]
+  samp_image_ids = dev_image_ids[samp_idx]
+  im_ids = [img_to_idx[ind] for ind in samp_image_ids]
+  samp_cnn = train_cnn_features[im_ids, ...]
+  logger.info('Sampling captions for: %s', samp_image_ids[:10])
 
   if bool_save_model:
     logger.info('Model save path: {}'.format(save_model_dir))
@@ -199,12 +218,22 @@ def main(_, conf={}):
       if niters % 20 == 0:
         logger.info(print_msg(i, niters, batch_loss, epoch_loss))
 
+      if start == 0:
+        # generate some sample captions
+        gen_samples = sess.run(generated_captions,
+            feed_dict={model.images: samp_cnn})
+        sampled_captions = decode_samples_to_captions(gen_samples, id_to_word)
+        for i, (idx, cap) in enumerate(zip(samp_image_ids, sampled_captions)):
+          logger.info('Generated caption for %s: %s', idx, ' '.join(cap))
+          if i == 10:
+            break
+
     if bool_save_model and i % (model_save_freq) == 0:
       # completed epoch, save model snapshot
       _path = saver.save(sess, solver_config.save_model_dir, global_step=i)
   if bool_save_model:
     # save the final model
-    saver.save(sess, solver_config.save_model_dir, global_step=niters)
+    saver.save(sess, solver_config.save_model_dir, global_step=num_epochs)
 
   coord.request_stop()
   sess.close()
@@ -212,4 +241,3 @@ def main(_, conf={}):
 
 if __name__ == '__main__':
     tf.app.run()
-

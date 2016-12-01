@@ -19,7 +19,8 @@ model.lstm_cells = 512
 model.dropout = 0.7
 model.img_input_feed = 'image_feature'
 model.cap_input_feed = 'input_feed'
-model.resume_from_model_path = None
+model.cap_generated = 'cap_generated'
+model.resume_from_model_path = None  # '../models/model-10'
 model.model_path = None  # used in case of 'eval' or 'inference'
 model.log_fname = join(_home_dir, _log_fname)
 

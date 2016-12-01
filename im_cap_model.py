@@ -4,23 +4,15 @@ from __future__ import division
 
 import os
 from os.path import join, exists
-import sys
-import math
-import shutil
 import tensorflow as tf
 import numpy as np
 from addict import Dict
-from pprint import pformat, pprint
+from pprint import pformat
 
-# from external.inputs import batch_with_dynamic_pad
 from utils import CONFIG
-
 config = CONFIG.Trainer
 logger = None
 
-###############################################################################
-###############################################################################
-###############################################################################
 
 class ImCapModel(object):
   """docstring for ImCapModel"""
@@ -67,6 +59,8 @@ class ImCapModel(object):
 
     # special tokens
     self._pad = word2int['<PAD>']
+    self._start = word2int['<ST>']
+    self._end = word2int['<ET>']
 
     # setup the placeholders and other variables for use later
     self.flags = flags
@@ -110,20 +104,16 @@ class ImCapModel(object):
     self.image_embeddings = image_embeddings
     logger.debug("Setting up the image embedding layer")
 
-  def _build_word_embed_layer(self):
+  def _build_word_embed_layer(self, input_seq, reuse=False):
     # caption features are stored in seq_embeddings with shape [batch_size,
     # seq_length, embedding_size]
-    with tf.variable_scope("seq_embedding"), tf.device('/cpu:0'):
+    with tf.variable_scope("seq_embedding", reuse=reuse), tf.device('/cpu:0'):
       seq_embedding_map = tf.get_variable(
           name="map",
           shape=[self.flags.cap_vocab_size, self.flags.cap_embedding_size],
           initializer=self.flags.params_initializer)
-      seq_embeddings = tf.nn.embedding_lookup(seq_embedding_map,
-                                              self.input_seqs)
-
-    self.seq_embedding_map = seq_embedding_map
-    self.seq_embeddings = seq_embeddings
-    logger.debug("Setting up the word embedding layer")
+      seq_embeddings = tf.nn.embedding_lookup(seq_embedding_map, input_seq)
+    return seq_embeddings
 
   def _initialize_lstm(self, image_embed_feats):
     with tf.variable_scope(
@@ -137,7 +127,7 @@ class ImCapModel(object):
   def build_model(self):
     self._build_inputs()
     self._build_image_embed_layer()
-    self._build_word_embed_layer()
+    self.seq_embeddings = self._build_word_embed_layer(self.input_seqs)
 
     word_captions = self.input_seqs
     enc_captions = self.seq_embeddings
@@ -174,35 +164,21 @@ class ImCapModel(object):
         loss += tf.reduce_sum(softmax * sequence_mask[:, t])
 
     return loss / tf.to_float(self.flags.batch_size)
-
 
   def build_generator(self):
-    self._build_inputs()
-    self._build_image_embed_layer()
-    self._build_word_embed_layer()
-
-    word_captions = self.input_seqs
-    enc_captions = self.seq_embeddings
-    input_sequence = enc_captions[:, :self.flags.cap_ntime_steps, :]
-    sequence_mask = tf.to_float(tf.not_equal(word_captions, self._pad))
-
+    # assume inputs and image embedding already setup
     state_list = self._initialize_lstm(self.image_embeddings)
-    indices = tf.to_int64(tf.expand_dims(
-        tf.range(0, self.flags.batch_size, 1), 1))
-    one_hot_map_size = [self.flags.batch_size, self.flags.cap_vocab_size]
 
-    loss = 0.0
+    generated_words = []
+    start_word = tf.expand_dims(tf.convert_to_tensor([self._start]), 1)
+    sample_word = tf.tile(start_word, [self.flags.batch_size, 1])
 
     for t in range(self.flags.cap_ntime_steps):
-      labels = tf.expand_dims(word_captions[:, t], 1)
-      idx_to_labs = tf.concat(1, [indices, labels])
-      target_sequence = tf.sparse_to_dense(
-          idx_to_labs, tf.to_int64(tf.pack(one_hot_map_size)), 1.0, 0.0)
-
+      seq_embeddings = self._build_word_embed_layer(sample_word)
       with tf.variable_scope(
           'lstm', initializer=self.flags.params_initializer, reuse=True):
         # Run a single LSTM step.
-        m, state_list = self.cell(input_sequence[:, t, :], state=state_list)
+        m, state_list = self.cell(tf.squeeze(seq_embeddings), state=state_list)
 
       with tf.variable_scope('logits', reuse=(t!=0)) as logits_scope:
         w_o = tf.get_variable('w', shape=[self.flags.num_lstm_units,
@@ -210,51 +186,9 @@ class ImCapModel(object):
         b_o = tf.get_variable('b', shape=[self.flags.cap_vocab_size])
 
         logits = tf.matmul(m, w_o) + b_o
+        sample_word = tf.argmax(logits, 1)
+        generated_words.append(sample_word)
 
-        softmax = tf.nn.softmax_cross_entropy_with_logits(
-            logits, target_sequence)
-        loss += tf.reduce_sum(softmax * sequence_mask[:, t])
-
-    return loss / tf.to_float(self.flags.batch_size)
-
-
-###############################################################################
-###############################################################################
-###############################################################################
-
-class Solver(object):
-  """docstring for Solver"""
-  def __init__(self, flags):
-    flags.num_epochs = flags['num_epochs']
-    flags.clip_gradients = 5.0
-    flags.opt_name = flags.get('optimizer', 'SGD')
-    if flags.opt_name.lower() == 'sgd':
-      flags.lr_initial = flags.get('learning_rate', 2.0)
-    elif flags.opt_name.lower() == 'adam':
-      flags.lr_initial = flags.get('learning_rate', 0.001)
-    else:
-      raise AttributeError('learning_rate expects SGD or Adam')
-    flags.lr_nepoch_per_decay = flags.num_epochs // 5
-    # use the following params for piecewise constant lr decay
-    flags.lr_ndecay_steps = 5
-    # self.flags.lr_decay_values: [2.0 1.0 0.5 0.1]
-    flags.lr_decay_vals = str_to_real_list(flags.lr_decay_values, ',')
-
-    assert exists(flags.model_path)
-    flags.model_path = (tf.train.latest_checkpoint(flags.model_path)
-        if os.path.isdir(flags.model_path) else flags.model_path)
-    assert flags.out_caption_path
-    assert flags.save_model_dir
-    if not exists(flags.save_model_dir):
-      os.makedirs(flags.save_model_dir)
-    flags.save_model_path = join(flags.save_model_dir, 'model')
-
-
-###############################################################################
-###############################################################################
-###############################################################################
-
-
-if __name__ == '__main__':
-  tf.app.run()
-
+    generated_captions = tf.transpose(
+        tf.pack(generated_words), (1, 0), name=self.flags.cap_generated)
+    return generated_captions
