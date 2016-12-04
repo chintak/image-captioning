@@ -27,6 +27,7 @@ class ImCapModel(object):
     # setup default configurations
     assert flags.mode in ['train', 'eval', 'inference']
     assert flags.num_samples and flags.mode != 'inference'
+    assert flags.cap_generated
     flags.batch_size = (flags.get('batch_size', None)
                         if flags['mode'] == 'train' else 1)
     flags.ckpt_epoch_freq = flags.get('ckpt_epoch_freq', 5)
@@ -55,7 +56,7 @@ class ImCapModel(object):
     flags.cap_vocab_size = flags.get('vocab_size', 9000)
     flags.cap_embedding_size = flags.get('embedding_size', 512)
     flags.num_lstm_units = flags.get('lstm_cells', 512)
-    flags.lstm_dropout_prob = 0.7 if flags.get('dropout', True) else 0.0
+    flags.lstm_dropout_prob = flags.get('dropout', 1.0)
 
     # special tokens
     self._pad = word2int['<PAD>']
@@ -142,7 +143,7 @@ class ImCapModel(object):
     loss = 0.0
 
     for t in range(self.flags.cap_ntime_steps):
-      labels = tf.expand_dims(word_captions[:, t], 1)
+      labels = tf.expand_dims(word_captions[:, t + 1], 1)
       idx_to_labs = tf.concat(1, [indices, labels])
       target_sequence = tf.sparse_to_dense(
           idx_to_labs, tf.to_int64(tf.pack(one_hot_map_size)), 1.0, 0.0)

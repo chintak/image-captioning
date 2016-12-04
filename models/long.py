@@ -4,37 +4,38 @@ from os.path import join
 
 __all__ = ['model', 'solver']
 
-_home_dir = 'expts/new_long'
+_home_dir = 'expts/long_05_512_resume_01'
 _log_fname = 'run.log'
 # Configuration for setting up a test model
 model = Dict()
 
 model.mode = 'train'
-model.batch_size = 128
+model.batch_size = 32
 model.num_samples = None  # filled while calling
 model.time_steps = 26
 model.vocab_size = 9000
 model.embedding_size = 512
 model.lstm_cells = 512
-model.dropout = 0.7
+model.dropout = 0.5
 model.img_input_feed = 'image_feature'
 model.cap_input_feed = 'input_feed'
-model.resume_from_model_path = None
+model.cap_generated = 'cap_generated'
+model.resume_from_model_path = 'expts/long_05_512_resume/model-360'
 model.model_path = None  # used in case of 'eval' or 'inference'
 model.log_fname = join(_home_dir, _log_fname)
 
 # Configuration for training the test model
 solver = Dict()
 
-solver.num_epochs = 100
+solver.num_epochs = 1000
 solver.save_model_dir = join(_home_dir, 'model')
-solver.max_to_keep = 0
-solver.ckpt_epoch_freq = 2
+solver.max_to_keep = 100
+solver.ckpt_epoch_freq = 20
 solver.train_clip_gradients = 5.0
 
 # fixed learning rate with Adam
 solver.optimizer = 'Adam'
-solver.learning_rate = 0.001
+solver.learning_rate = 0.0001
 
 # decay learning rate with SGD
 # solver.optimizer = 'SGD'

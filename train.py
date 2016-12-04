@@ -87,8 +87,19 @@ def print_msg(*args):
   return "epoch: {} niter: {} batch_loss: {} curr_epoch_loss: {}".format(*args)
 
 def decode_samples_to_captions(samples, id_to_word):
-  return [[id_to_word[idx] for idx in sample if id_to_word.get(idx, None)]
-          for sample in samples]
+  captions = []
+  for sample in samples:
+    cap = []
+    for idx in sample:
+      w = id_to_word.get(idx, None)
+      if w is None:
+        continue
+      elif w == '<ET>':
+        break
+      cap.append(w)
+    captions.append(cap)
+  return captions
+
 
 def main(_, conf={}):
   global logger
@@ -105,25 +116,36 @@ def main(_, conf={}):
   # print the experiment flags for logging purpose
   logger.info("python %s", stringify(sys.argv, ' '))
 
+  ###########################################################################
   # load train image captions
+  ###########################################################################
   train_cap_path = join(raw_captions_dir, 'Flickr8k.train.annotation.kl')
   train_image_ids, train_raw_captions = unpickle(train_cap_path)
 
+  ###########################################################################
   # load dev image captions
+  ###########################################################################
   dev_cap_path = join(raw_captions_dir, 'Flickr8k.dev.annotation.kl')
   dev_image_ids, dev_raw_captions = unpickle(dev_cap_path)
 
+  ###########################################################################
   # load vocab
+  ###########################################################################
   vocab_path = join(raw_captions_dir, 'vocab.kl')
   word_to_ids = unpickle(vocab_path)
   id_to_word = dict([(v, k) for k, v in word_to_ids.iteritems()])
 
+  ###########################################################################
   # load cnn features
+  ###########################################################################
   (img_to_idx, train_cnn_features) = load_cnn_features(cnn_feats_path)
 
+  ###########################################################################
   # load the model config
+  ###########################################################################
   model_config = mymodel.model
   num_samples = model_config.num_samples = len(train_image_ids)
+  logger.info('Solver configuration: %s', pformat(solver_config))
 
   batch_size = model_config.batch_size
   num_epochs = solver_config.num_epochs
@@ -132,12 +154,17 @@ def main(_, conf={}):
   if bool_save_model and not exists(save_model_dir):
     os.makedirs(save_model_dir)
 
+  ###########################################################################
   # create the model
+  ###########################################################################
   model = ImCapModel(model_config, word_to_ids)
   loss = model.build_model()
   tf.get_variable_scope().reuse_variables()
   generated_captions = model.build_generator()
 
+  ###########################################################################
+  # training related variables
+  ###########################################################################
   global_step = tf.Variable(
       initial_value=0,
       name="global_step",
@@ -153,17 +180,23 @@ def main(_, conf={}):
       clip_gradients=solver_config.train_clip_gradients,
       learning_rate_decay_fn=None)
 
+  ###########################################################################
   # setup saver
+  ###########################################################################
   saver = tf.train.Saver(max_to_keep=solver_config.max_to_keep)
 
+  ###########################################################################
   # setup Session and begin training
+  ###########################################################################
   sess = tf.Session()
   coord = tf.train.Coordinator()
 
   init = tf.initialize_all_variables()
   sess.run(init)
 
+  ###########################################################################
   # restore previously saved model to resume training
+  ###########################################################################
   bool_resume_path = True if model_config.resume_from_model_path else False
   if bool_resume_path and exists(model_config.resume_from_model_path):
     restore_model(sess, model_config.resume_from_model_path)
@@ -182,10 +215,10 @@ def main(_, conf={}):
   num_gen_samples = model_config.batch_size
   samp_idx = np.random.randint(0, dev_raw_captions.shape[0], num_gen_samples)
   samp_captions = dev_raw_captions[samp_idx, :]
-  samp_image_ids = dev_image_ids[samp_idx]
-  im_ids = [img_to_idx[ind] for ind in samp_image_ids]
+  samp_img_ids = dev_image_ids[samp_idx]
+  im_ids = [img_to_idx[ind] for ind in samp_img_ids]
   samp_cnn = train_cnn_features[im_ids, ...]
-  logger.info('Sampling captions for: %s', samp_image_ids[:10])
+  logger.info('Sampling captions for: [%s]', ','.join(samp_img_ids[:10]))
 
   if bool_save_model:
     logger.info('Model save path: {}'.format(save_model_dir))
@@ -195,6 +228,9 @@ def main(_, conf={}):
   logger.info('Num of samples: {}'.format(num_samples))
   logger.info('Num of iters: {}'.format(num_iters_to_run))
 
+  ###########################################################################
+  # start training
+  ###########################################################################
   for i in range(num_epochs):
     epoch_loss = 0.
     idxs = np.random.permutation(num_samples)
@@ -223,9 +259,10 @@ def main(_, conf={}):
         gen_samples = sess.run(generated_captions,
             feed_dict={model.images: samp_cnn})
         sampled_captions = decode_samples_to_captions(gen_samples, id_to_word)
-        for i, (idx, cap) in enumerate(zip(samp_image_ids, sampled_captions)):
-          logger.info('Generated caption for %s: %s', idx, ' '.join(cap))
-          if i == 10:
+        for j, (idx, cap) in enumerate(zip(samp_img_ids, sampled_captions)):
+          logger.info('Generated caption: epoch %d, %s - %s',
+                      i, idx, ' '.join(cap))
+          if j == 10:
             break
 
     if bool_save_model and i % (model_save_freq) == 0:

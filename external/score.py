@@ -43,6 +43,7 @@ def evaluate(data_path='./data', split='val', get_scores=False):
     hypo[i] = [caption]
 
   # compute bleu score
+  print ref.items()[:10], hypo.items()[:10]
   final_scores = get_score(ref, hypo)
 
   # print out scores
