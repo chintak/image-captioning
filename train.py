@@ -12,6 +12,7 @@ import numpy as np
 from pprint import pformat
 import cPickle as pickle
 import importlib
+from data_loader import load_dataset
 
 from im_cap_model import ImCapModel
 from utils import CONFIG
@@ -24,10 +25,6 @@ FLAGS = tf.app.flags.FLAGS
 
 tf.flags.DEFINE_string("model_config_name", "",
                        "Which model config to use.")
-tf.flags.DEFINE_string("cnn_features_path", "",
-                       "Path to file containing cnn features.")
-tf.flags.DEFINE_string("raw_captions_dir", "",
-                       "Path to file containing raw captions.")
 tf.flags.DEFINE_string("save_model_dir", "",
                        "Path to dir to save model checkpoint.")
 tf.flags.DEFINE_string("model_path", "",
@@ -38,6 +35,8 @@ tf.flags.DEFINE_string("resume_from_model_path", None,
                        "Path to model checkpoint to resume training.")
 tf.flags.DEFINE_string("mode", "train",
                        "Run mode.")
+tf.flags.DEFINE_string("dataset_name", "flickr8k",
+                       "flickr8k, flickr30k or coco")
 
 
 def unpickle(path):
@@ -103,10 +102,6 @@ def decode_samples_to_captions(samples, id_to_word):
 
 def main(_, conf={}):
   global logger
-  assert exists(FLAGS.cnn_features_path)
-  assert exists(FLAGS.raw_captions_dir)
-  cnn_feats_path = FLAGS.cnn_features_path
-  raw_captions_dir = FLAGS.raw_captions_dir
   try:
     mymodel = importlib.import_module(FLAGS.model_config_name)
   except:
@@ -119,27 +114,45 @@ def main(_, conf={}):
   ###########################################################################
   # load train image captions
   ###########################################################################
-  train_cap_path = join(raw_captions_dir, 'Flickr8k.train.annotation.kl')
-  train_image_ids, train_raw_captions = unpickle(train_cap_path)
+  # assert exists(FLAGS.cnn_features_path)
+  # assert exists(FLAGS.raw_captions_dir)
+  # cnn_feats_path = FLAGS.cnn_features_path
+  # raw_captions_dir = FLAGS.raw_captions_dir
+  # train_cap_path = join(raw_captions_dir, 'Flickr8k.train.annotation.kl')
+  # train_image_ids, train_raw_captions = unpickle(train_cap_path)
+
+  # ###########################################################################
+  # # load dev image captions
+  # ###########################################################################
+  # dev_cap_path = join(raw_captions_dir, 'Flickr8k.dev.annotation.kl')
+  # dev_image_ids, dev_raw_captions = unpickle(dev_cap_path)
+
+  # ###########################################################################
+  # # load vocab
+  # ###########################################################################
+  # vocab_path = join(raw_captions_dir, 'vocab.kl')
+  # word_to_ids = unpickle(vocab_path)
+  # id_to_word = dict([(v, k) for k, v in word_to_ids.iteritems()])
+
+  # ###########################################################################
+  # # load cnn features
+  # ###########################################################################
+  # (train_img_to_idx, train_cnn_features) = load_cnn_features(cnn_feats_path)
+  # dev_img_to_idx = train_img_to_idx
 
   ###########################################################################
-  # load dev image captions
+  # new way of loading dataset
   ###########################################################################
-  dev_cap_path = join(raw_captions_dir, 'Flickr8k.dev.annotation.kl')
-  dev_image_ids, dev_raw_captions = unpickle(dev_cap_path)
+  dataset_dir = 'data/%s' % FLAGS.dataset_name
+  logger.info("Dataset path: %s", dataset_dir)
+  ret = load_dataset(dataset_dir, split='train')
+  (train_raw_captions, train_image_ids,
+    train_cnn_features, train_img_to_idx, word_to_ids) = ret
 
-  ###########################################################################
-  # load vocab
-  ###########################################################################
-  vocab_path = join(raw_captions_dir, 'vocab.kl')
-  word_to_ids = unpickle(vocab_path)
+  ret = load_dataset(dataset_dir, word_to_id=word_to_ids, split='val')
+  (dev_raw_captions, dev_image_ids, dev_cnn_features, dev_img_to_idx, _) = ret
+
   id_to_word = dict([(v, k) for k, v in word_to_ids.iteritems()])
-
-  ###########################################################################
-  # load cnn features
-  ###########################################################################
-  (img_to_idx, train_cnn_features) = load_cnn_features(cnn_feats_path)
-
   ###########################################################################
   # load the model config
   ###########################################################################
@@ -216,7 +229,7 @@ def main(_, conf={}):
   samp_idx = np.random.randint(0, dev_raw_captions.shape[0], num_gen_samples)
   samp_captions = dev_raw_captions[samp_idx, :]
   samp_img_ids = dev_image_ids[samp_idx]
-  im_ids = [img_to_idx[ind] for ind in samp_img_ids]
+  im_ids = [dev_img_to_idx[ind] for ind in samp_img_ids]
   samp_cnn = train_cnn_features[im_ids, ...]
   logger.info('Sampling captions for: [%s]', ','.join(samp_img_ids[:10]))
 
@@ -243,7 +256,7 @@ def main(_, conf={}):
                           range(batch_size, num_samples, batch_size)):
       batch_caps = epoch_captions[start:end, :]
       batch_img_ids = epoch_image_ids[start:end]
-      im_ids = [img_to_idx[ind] for ind in batch_img_ids]
+      im_ids = [train_img_to_idx[ind] for ind in batch_img_ids]
       batch_cnn = train_cnn_features[im_ids, ...]
 
       feeder = {model.images: batch_cnn, model.input_seqs: batch_caps}
