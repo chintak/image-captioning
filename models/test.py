@@ -4,7 +4,7 @@ from os.path import join
 
 __all__ = ['model', 'solver']
 
-_home_dir = 'expts/test_model'
+_home_dir = 'expts/test'
 _log_fname = 'run.log'
 # Configuration for setting up a test model
 model = Dict()
@@ -13,7 +13,7 @@ model.mode = 'train'
 model.batch_size = 128
 model.num_samples = None  # filled while calling
 model.time_steps = 26
-model.vocab_size = 9000
+model.vocab_size = None  # filled while calling
 model.embedding_size = 512
 model.lstm_cells = 128
 model.dropout = 0.7

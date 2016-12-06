@@ -4,7 +4,7 @@ from os.path import join
 
 __all__ = ['model', 'solver']
 
-_home_dir = 'expts/long_05_512_resume_01'
+_home_dir = 'expts/long'
 _log_fname = 'run.log'
 # Configuration for setting up a test model
 model = Dict()
@@ -13,14 +13,14 @@ model.mode = 'train'
 model.batch_size = 32
 model.num_samples = None  # filled while calling
 model.time_steps = 26
-model.vocab_size = 9000
+model.vocab_size = None  # filled while calling
 model.embedding_size = 512
 model.lstm_cells = 512
 model.dropout = 0.5
 model.img_input_feed = 'image_feature'
 model.cap_input_feed = 'input_feed'
 model.cap_generated = 'cap_generated'
-model.resume_from_model_path = 'expts/long_05_512_resume/model-360'
+model.resume_from_model_path = None
 model.model_path = None  # used in case of 'eval' or 'inference'
 model.log_fname = join(_home_dir, _log_fname)
 

@@ -107,6 +107,8 @@ def main(_, conf={}):
   except:
     raise AttributeError("No model named %s" % FLAGS.model_config_name)
   solver_config = mymodel.solver
+  solver_config.log_fname = solver_config.log_fname.replace(
+      "expts", "expts/{}".format(FLAGS.dataset_name))
   logger = config.log.getLogger(flag=3, fname=solver_config.log_fname)
   # print the experiment flags for logging purpose
   logger.info("python %s", stringify(sys.argv, ' '))
@@ -158,11 +160,19 @@ def main(_, conf={}):
   ###########################################################################
   model_config = mymodel.model
   num_samples = model_config.num_samples = len(train_image_ids)
+  model_config.log_fname = model_config.log_fname.replace(
+      "expts", "expts/{}".format(FLAGS.dataset_name))
   logger.info('Solver configuration: %s', pformat(solver_config))
 
   batch_size = model_config.batch_size
   num_epochs = solver_config.num_epochs
-  save_model_dir = solver_config.get('save_model_dir', FLAGS.save_model_dir)
+  solver_config.save_model_dir = solver_config.save_model_dir.replace(
+      "expts", "expts/{}".format(FLAGS.dataset_name))
+  if FLAGS.save_model_dir:
+    save_model_dir = FLAGS.save_model_dir
+    solver_config.save_model_dir = save_model_dir
+  else:
+    save_model_dir = solver_config.save_model_dir
   bool_save_model = True if save_model_dir else False
   if bool_save_model and not exists(save_model_dir):
     os.makedirs(save_model_dir)
