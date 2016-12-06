@@ -160,6 +160,7 @@ def main(_, conf={}):
   ###########################################################################
   model_config = mymodel.model
   num_samples = model_config.num_samples = len(train_image_ids)
+  model_config.vocab_size = len(word_to_ids.keys()) + 1
   model_config.log_fname = model_config.log_fname.replace(
       "expts", "expts/{}".format(FLAGS.dataset_name))
   logger.info('Solver configuration: %s', pformat(solver_config))
