@@ -10,7 +10,7 @@ _log_fname = 'run.log'
 model = Dict()
 
 model.mode = 'train'
-model.batch_size = 32
+model.batch_size = 128
 model.num_samples = None  # filled while calling
 model.time_steps = 26
 model.vocab_size = None  # filled while calling
