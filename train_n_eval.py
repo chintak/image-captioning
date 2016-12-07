@@ -237,9 +237,8 @@ def main(_, conf={}):
   ###########################################################################
   # restore previously saved model to resume training
   ###########################################################################
-  bool_resume_path = True if model_config.resume_from_model_path else False
-  if bool_resume_path and exists(model_config.resume_from_model_path):
-    restore_model(sess, model_config.resume_from_model_path)
+  if exists(FLAGS.resume_from_model_path):
+    restore_model(sess, FLAGS.resume_from_model_path)
 
   tf.get_default_graph().finalize()
 
@@ -349,7 +348,8 @@ def predict(sess, generated_captions, dev_cnn_features, dev_img_to_idx,
       names[name] = name
       ref[name] = decode_samples_to_captions(caps, id_to_word)
 
-    print '\tProcessed %d/%d samples.' % (start, num_samples)
+    if start % (5 * batch_size) == 0:
+      print '\tProcessed %d/%d samples.' % (start, num_samples)
 
   assert len(ref.keys()) == len(hypo.keys())
   assert len(ref.keys()) == num_samples

@@ -128,7 +128,11 @@ def main(_, conf={}):
   graph = tf.get_default_graph()
   images_t = graph.get_tensor_by_name('image_feature:0')
   generated_captions = graph.get_tensor_by_name('cap_generated:0')
-  batch_size = int(generated_captions.get_shape()[0] or 1)
+  print isinstance(generated_captions.get_shape()[0] or 20, int)
+  try:
+    batch_size = int(generated_captions.get_shape()[0] or 1)
+  except:
+    batch_size = 32
   graph.finalize()
 
   logger.info('Num of dev samples: {}'.format(num_samples))
