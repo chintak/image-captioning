@@ -1,3 +1,6 @@
+# see https://github.com/tylin/coco-caption/
+# standard evaluation code
+#
 import cPickle as pickle
 import os
 import sys
