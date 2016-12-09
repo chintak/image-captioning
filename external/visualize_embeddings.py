@@ -13,24 +13,41 @@ from sklearn.manifold import TSNE
 import nltk
 
 colors = {
-  'NN': 'blue',
-  'JJ': 'red',
-  'VB': 'cyan',
-  'RB': 'green',
+    'NN': 'blue',
+    'JJ': 'red',
+    'VB': 'cyan',
+    'RB': 'green',
 }
+
+words = [
+    'men', 'woman', 'girl', 'boy', 'child', 'children', 'boys', 'girls',
+    'surf', 'surfing', 'snow', 'tennis',
+    'basketball', 'skating', 'soccer', 'hockey', 'baseball', 'car',
+    'motorcycle', 'bike', 'bicycle', 'shirt', 'shorts', 'pants', 'clothes',
+    'jeans', 'jacket', 'suit'
+]
 
 def main():
   embeddings_file = sys.argv[1]
-  save_path = '{}.eps'.format(splitext(embeddings_file)[0])
+  save_path = '{}.eps'.format(splitext(embeddings_file)[0].replace('.', '_'))
   wv, vocabulary = load_embeddings(embeddings_file)
 
   tsne = TSNE(n_components=2, random_state=0)
   np.set_printoptions(suppress=True)
   Y = tsne.fit_transform(wv[:1000,:])
 
-  fig = plt.figure(figsize=(100.0, 100.0))
-  fig.add_subplot(111).scatter(Y[:, 0], Y[:, 1])
+  fig = plt.figure(figsize=(6.0, 6.0))
+  px = []
+  py = []
   for label, x, y in zip(vocabulary, Y[:, 0], Y[:, 1]):
+    if label in words:
+      px.append(x)
+      py.append(y)
+  fig.add_subplot(111).scatter(px[:], py[:])
+  # fig.add_subplot(111).scatter(Y[:, 0], Y[:, 1])
+  for label, x, y in zip(vocabulary, Y[:, 0], Y[:, 1]):
+    if label not in words:
+      continue
     _, pt = nltk.pos_tag([label])[0]
     for k in colors.keys():
       if k in pt:
